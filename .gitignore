@@ -1,0 +1,39 @@
+.DS_Store
+
+# Build output
+bin/
+*.exe
+
+# Source photos (not committed — generated ascii art in internal/pages/bio/ is)
+assets/*.jpg
+assets/*.JPG
+assets/*.png
+assets/*.jpeg
+assets/*.JPEG
+# Keep folder structure
+!assets/.gitkeep
+!assets/animals/.gitkeep
+
+# Preview / scratch files
+previews/
+
+# Go workspace
+go.work
+go.work.sum
+
+# SSH host keys (NEVER commit private keys)
+.ssh/
+!.ssh/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# animals/ should only hold source GIFs for the animal pipeline (Phase 3)
+assets/animals/*.jpg
+assets/animals/*.JPG
+assets/animals/*.png
+assets/animals/*.jpeg
+assets/animals/*.JPEG

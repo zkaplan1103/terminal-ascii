@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/wish/activeterm"
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
+	"github.com/muesli/termenv"
 
 	"github.com/zkaplan/terminal-site/internal/router"
 )
@@ -31,7 +32,7 @@ func main() {
 		wish.WithAddress(net.JoinHostPort(host, port)),
 		wish.WithHostKeyPath(hostKey),
 		wish.WithMiddleware(
-			bubbletea.Middleware(teaHandler),
+			bubbletea.MiddlewareWithColorProfile(teaHandler, termenv.ANSI256),
 			activeterm.Middleware(),
 			logging.Middleware(),
 		),

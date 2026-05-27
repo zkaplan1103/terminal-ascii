@@ -64,9 +64,7 @@ func main() {
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 	pty, _, _ := s.Pty()
 	m := router.New(s.User(), pty.Window.Width, pty.Window.Height)
-	renderer := bubbletea.MakeRenderer(s)
-	return m, []tea.ProgramOption{
-		tea.WithAltScreen(),
-		tea.WithOutput(renderer.Output()),
-	}
+	opts := bubbletea.MakeOptions(s)
+	opts = append(opts, tea.WithAltScreen())
+	return m, opts
 }

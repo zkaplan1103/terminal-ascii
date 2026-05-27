@@ -354,12 +354,12 @@ func (m Model) viewCare() string {
 	b.WriteString(stateStyle.Render(fmt.Sprintf("[ %s ]", s.State.String())))
 	b.WriteString("\n\n")
 
-	// Stat bars
-	b.WriteString(statLine("hunger   ", s.Hunger))
+	// Stat bars — hunger: high is bad. energy/happiness: low is bad.
+	b.WriteString(statLine("hunger   ", s.Hunger, true))
 	b.WriteString("\n")
-	b.WriteString(statLine("energy   ", s.Energy))
+	b.WriteString(statLine("energy   ", s.Energy, false))
 	b.WriteString("\n")
-	b.WriteString(statLine("happiness", s.Happiness))
+	b.WriteString(statLine("happiness", s.Happiness, false))
 	b.WriteString("\n\n")
 
 	// Actions
@@ -378,15 +378,35 @@ func (m Model) viewCare() string {
 }
 
 // statLine renders a labeled progress bar for a 0..100 value.
-func statLine(label string, val int) string {
+// highIsBad flips the color logic: for hunger, a high value is bad (red).
+// For energy/happiness, a low value is bad (red).
+func statLine(label string, val int, highIsBad bool) string {
 	const barWidth = 20
 	filled := val * barWidth / 100
 	if filled > barWidth {
 		filled = barWidth
 	}
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+	// Pick bar colour based on how "healthy" the value is.
+	// goodness = how good the value is (0..100 regardless of direction).
+	goodness := val
+	if highIsBad {
+		goodness = 100 - val
+	}
+	var barColor lipgloss.Color
+	switch {
+	case goodness >= 60:
+		barColor = lipgloss.Color("46")  // bright green — good
+	case goodness >= 30:
+		barColor = lipgloss.Color("214") // amber — warning
+	default:
+		barColor = lipgloss.Color("196") // red — critical
+	}
+
+	filledBar := lipgloss.NewStyle().Foreground(barColor).Render(strings.Repeat("█", filled))
+	emptyBar := lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render(strings.Repeat("░", barWidth-filled))
 	pct := fmt.Sprintf("%3d%%", val)
-	return labelStatStyle.Render(label) + " " + barStyle.Render(bar) + " " + pctStyle.Render(pct)
+	return labelStatStyle.Render(label) + " " + filledBar + emptyBar + " " + pctStyle.Render(pct)
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -419,9 +439,6 @@ var (
 
 	labelStatStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("245"))
-
-	barStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("34"))
 
 	pctStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))

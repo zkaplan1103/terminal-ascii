@@ -2,19 +2,22 @@
 """
 slice.py — Phase 1 of the build-frames pipeline.
 
-Reads RPGMaker-format sprite sheets from assets/animals/farm_animals_4.18.24/
+Reads RPGMaker-format sprite sheets from assets/animals/farm_animals_4.18.24/3x(RMMVMZ)/
 and slices every defined animal×state into individual frame PNGs under
 /tmp/build-frames/<species>_<variant>/<state>/frame_NNN.png
 
-Sheet layout (all sheets):
-  384×256 px total
+Sheet layout (3x sheets):
+  1152×768 px total
   4 character blocks per row, 2 rows = 8 characters per sheet
-  Each character block: 96×128 px
-  Walk frames: 3 columns × 4 direction rows = 32×32 px per frame
-  Direction rows: 0=down, 1=left, 2=right, 3=up
+  Each character block: 288×384 px
+  Walk frames: 3 columns × 4 direction rows = 96×96 px per frame
+  Direction rows: 0=down/front, 1=left, 2=right, 3=up/back
 
-We use direction row 2 (facing right / side profile) for all animations
-since that reads best in a left-aligned terminal.
+We use direction row 0 (front-facing 3/4 view) — shows the animal's face,
+eyes, and ears; much cuter and more readable than the side profile.
+
+Source: 3x sheets — native 96×96px frames, no manual upscaling needed.
+No-shadow variants (animals1.png etc., not animals1_shadow.png).
 
 For eating states the pack provides separate "head down grazing" character
 blocks on the same sheet (slots 4-7 mirror slots 0-3 but with head down).
@@ -23,14 +26,14 @@ blocks on the same sheet (slots 4-7 mirror slots 0-3 but with head down).
 from PIL import Image
 import os, shutil
 
-ASSETS = os.path.join(os.path.dirname(__file__), '../../assets/animals/farm_animals_4.18.24')
+ASSETS = os.path.join(os.path.dirname(__file__), '../../assets/animals/farm_animals_4.18.24/3x(RMMVMZ)')
 OUT    = '/tmp/build-frames'
 
-# RPGMaker sheet constants
-CHAR_W, CHAR_H   = 96, 128
-FRAME_W, FRAME_H = 32, 32
+# 3x sheet constants
+CHAR_W, CHAR_H   = 288, 384
+FRAME_W, FRAME_H = 96, 96
 CHARS_PER_ROW    = 4
-DIRECTION_ROW    = 2   # facing right — best side profile
+DIRECTION_ROW    = 0   # front-facing 3/4 view — shows face, eyes, ears
 
 # ── Animal manifest ────────────────────────────────────────────────────────────
 # Each entry: (sheet_file, char_slot, species, variant, state)
@@ -94,7 +97,7 @@ MANIFEST = [
 
 
 def extract_frames(img, char_slot, direction_row):
-    """Extract all 3 walk frames for a given character slot and direction."""
+    """Extract all 3 animation frames for a given character slot and direction."""
     col = char_slot % CHARS_PER_ROW
     row = char_slot // CHARS_PER_ROW
     bx = col * CHAR_W
@@ -110,9 +113,23 @@ def extract_frames(img, char_slot, direction_row):
     return frames
 
 
-def scale_up(frame, factor=4):
-    """Scale a frame up with nearest-neighbor for better chafa rendering."""
-    return frame.resize((frame.width * factor, frame.height * factor), Image.NEAREST)
+def tight_crop(frame, pad=6):
+    """Crop an RGBA frame to its non-transparent content bounding box.
+
+    Adds `pad` pixels of margin on all sides so chafa has a small border.
+    Returns the original frame unchanged if it is entirely transparent.
+    """
+    r, g, b, a = frame.split()
+    bbox = a.getbbox()
+    if bbox is None:
+        return frame  # fully transparent — keep as-is
+
+    left, top, right, bottom = bbox
+    left   = max(0, left  - pad)
+    top    = max(0, top   - pad)
+    right  = min(frame.width,  right  + pad)
+    bottom = min(frame.height, bottom + pad)
+    return frame.crop((left, top, right, bottom))
 
 
 def main():
@@ -120,7 +137,7 @@ def main():
         shutil.rmtree(OUT)
     os.makedirs(OUT)
 
-    # Load sheets once
+    # Load sheets once (3x, no-shadow)
     sheets = {}
     for sheet_name in ['animals1.png', 'animals2.png', 'animals3.png', 'horses.png']:
         path = os.path.join(ASSETS, sheet_name)
@@ -136,9 +153,9 @@ def main():
         os.makedirs(state_dir, exist_ok=True)
 
         for i, frame in enumerate(frames):
-            scaled = scale_up(frame, factor=4)
+            cropped = tight_crop(frame, pad=6)
             out_path = os.path.join(state_dir, f'frame_{i:03d}.png')
-            scaled.save(out_path)
+            cropped.save(out_path)
 
         counts[key] = counts.get(key, 0) + len(frames)
 
@@ -147,7 +164,8 @@ def main():
             idle_dir = os.path.join(OUT, key, 'idle')
             os.makedirs(idle_dir, exist_ok=True)
             # Middle frame (index 1) = neutral standing pose
-            scale_up(frames[1], factor=4).save(os.path.join(idle_dir, 'frame_000.png'))
+            cropped = tight_crop(frames[1], pad=6)
+            cropped.save(os.path.join(idle_dir, 'frame_000.png'))
 
     print(f"Sliced {len(MANIFEST)} animal×state combos into {OUT}/")
     for key in sorted(counts):

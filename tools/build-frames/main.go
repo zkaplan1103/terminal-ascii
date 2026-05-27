@@ -1,12 +1,15 @@
 // tools/build-frames — Phase 2 of the sprite pipeline.
 //
 // Reads pre-sliced frame PNGs from /tmp/build-frames/ (produced by slice.py),
-// renders each one with chafa in block mode, and emits Go source files under
-// internal/ascii/<species>_<variant>_<state>.go
+// renders each one with chafa in braille mode (monochrome), and emits Go source
+// files under internal/ascii/<species>_<variant>_<state>.go
+//
+// Frames are already tight-cropped by slice.py (transparent margins removed),
+// so chafa gets maximum pixel density for its output size.
 //
 // Usage:
 //
-//	python3 tools/build-frames/slice.py   # slice sprite sheets
+//	python3 tools/build-frames/slice.py   # slice + crop sprite sheets
 //	go run ./tools/build-frames           # render + emit Go files
 package main
 
@@ -26,9 +29,11 @@ const (
 	framesRoot = "/tmp/build-frames"
 	outPkg     = "internal/ascii"
 
-	// chafa render size — matches the care view animal frame box.
-	chafaW = "30"
-	chafaH = "14"
+	// chafa render size.
+	// 48 wide gives good horizontal detail; 24 tall accommodates the front-facing
+	// sprite aspect ratio (wider than tall after crop).
+	chafaW = "48"
+	chafaH = "24"
 )
 
 // frameDelays per state. Walk/idle are snappier; eat is slow (grazing).
@@ -76,9 +81,9 @@ type tmplData struct {
 
 func renderFrame(pngPath string) (string, error) {
 	cmd := exec.Command("chafa",
-		"--symbols", "block",
+		"--symbols", "braille", // braille dots: 8 sub-pixels per cell, maximum detail
 		"--size", chafaW+"x"+chafaH,
-		"--colors", "none", // monochrome — no ANSI color codes in stored strings
+		"--colors", "none", // monochrome — no ANSI color codes, pure dot density
 		pngPath,
 	)
 	var out bytes.Buffer
@@ -111,7 +116,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Determine repo root (two levels up from this file's package).
+	// Determine repo root (cwd when invoked via go run ./tools/build-frames/).
 	repoRoot, err := filepath.Abs(filepath.Join("."))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot resolve repo root: %v\n", err)

@@ -17,9 +17,9 @@ import (
 type adoptView int
 
 const (
-	viewPickCategory adoptView = iota
-	viewPickAnimal
-	viewCare
+	viewPickSpecies adoptView = iota // pick a species (dogs, cats, horses…)
+	viewPickAnimal                   // pick a named animal within that species
+	viewCare                         // care view with animation
 )
 
 // zooTickMsg fires every second to advance session stats.
@@ -29,24 +29,97 @@ func zooTick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return zooTickMsg{now: t} })
 }
 
+// overlayMsg is sent by the care view to trigger a timed overlay burst.
+type overlayMsg struct {
+	kind    overlayKind
+	framesLeft int
+}
+
+type overlayKind int
+
+const (
+	overlayNone     overlayKind = iota
+	overlayHearts               // ♥ on pet
+	overlaySparkles             // ✦ on walk
+	overlayFood                 // 🍎 on feed
+	overlayZzz                  // z z Z on sleep
+)
+
+// overlay holds the current active overlay and remaining display frames.
+type overlay struct {
+	kind       overlayKind
+	framesLeft int
+	tick       int // increments each animation tick, drives frame cycling
+}
+
+func (o overlay) active() bool { return o.kind != overlayNone && o.framesLeft > 0 }
+
+func (o overlay) advance() overlay {
+	if o.framesLeft > 0 {
+		o.framesLeft--
+		o.tick++
+	}
+	if o.framesLeft == 0 {
+		o.kind = overlayNone
+	}
+	return o
+}
+
+// render returns the overlay string for the current frame.
+func (o overlay) render() string {
+	if !o.active() {
+		return ""
+	}
+	switch o.kind {
+	case overlayHearts:
+		frames := []string{
+			"  ♥       ",
+			"  ♥  ♥    ",
+			"♥ ♥  ♥    ",
+			"♥ ♥  ♥  ♥ ",
+		}
+		return heartStyle.Render(frames[o.tick%len(frames)])
+	case overlaySparkles:
+		frames := []string{
+			"  ✦       ",
+			"  ✦  ✦    ",
+			"✦ ✦  ✦    ",
+			"✦ ✦  ✦  ✦ ",
+		}
+		return sparkleStyle.Render(frames[o.tick%len(frames)])
+	case overlayFood:
+		frames := []string{
+			"  🍎      ",
+			"  🍎 🥕   ",
+			"🌽🍎 🥕   ",
+		}
+		return foodStyle.Render(frames[o.tick%len(frames)])
+	case overlayZzz:
+		frames := []string{"z", "z z", "z z Z", "z z Z"}
+		return zzzStyle.Render(frames[o.tick%len(frames)])
+	}
+	return ""
+}
+
 // Model is the adopt page's Bubble Tea model.
 type Model struct {
 	width  int
 	height int
 
-	view     adoptView
-	catIdx   int      // cursor in category picker
-	cats     []string // ["farm", "exotic"]
-	animalIdx int     // cursor in animal picker
-	animals  []*zoo.Animal
+	view         adoptView
+	speciesIdx   int      // cursor in species picker
+	speciesList  []string // ordered list of species keys
+	animalIdx    int      // cursor in animal picker
+	animals      []*zoo.Animal
 
 	session *zoo.Session
 	animal  ui.AnimalView
+	ov      overlay
 }
 
 func New() Model {
 	return Model{
-		cats: []string{"farm", "exotic"},
+		speciesList: zoo.SpeciesOrder,
 	}
 }
 
@@ -69,6 +142,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.view == viewCare {
 			var cmd tea.Cmd
 			m.animal, cmd = m.animal.Update(msg)
+			m.ov = m.ov.advance()
 			return m, cmd
 		}
 
@@ -83,43 +157,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.view {
 
-	// ── Category picker ──────────────────────────────────────────
-	case viewPickCategory:
+	// ── Species picker ────────────────────────────────────────────────────────
+	case viewPickSpecies:
 		switch key {
 		case "up", "k":
-			if m.catIdx > 0 {
-				m.catIdx--
+			if m.speciesIdx > 0 {
+				m.speciesIdx--
 			}
 		case "down", "j":
-			if m.catIdx < len(m.cats)-1 {
-				m.catIdx++
+			if m.speciesIdx < len(m.speciesList)-1 {
+				m.speciesIdx++
 			}
 		case "enter", " ":
-			cat := m.cats[m.catIdx]
-			order := zoo.FarmOrder
-			if cat == "exotic" {
-				order = zoo.ExoticOrder
-			}
-			bycat := zoo.ByCategory()
-			catAnimals := bycat[cat]
-			// Sort by the defined order.
-			sorted := make([]*zoo.Animal, 0, len(catAnimals))
-			for _, species := range order {
-				for _, a := range catAnimals {
-					if a.Species == species {
-						sorted = append(sorted, a)
-						break
-					}
-				}
-			}
-			m.animals = sorted
+			species := m.speciesList[m.speciesIdx]
+			bySpecies := zoo.BySpecies()
+			m.animals = bySpecies[species]
 			m.animalIdx = 0
 			m.view = viewPickAnimal
 		case "esc":
 			return m, func() tea.Msg { return page.NavigateMsg{To: "bio"} }
 		}
 
-	// ── Animal picker ─────────────────────────────────────────────
+	// ── Animal picker ─────────────────────────────────────────────────────────
 	case viewPickAnimal:
 		switch key {
 		case "up", "k":
@@ -137,37 +196,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = viewCare
 			return m, tea.Batch(m.animal.Init(), zooTick())
 		case "esc":
-			m.view = viewPickCategory
+			m.view = viewPickSpecies
 		}
 
-	// ── Care view ─────────────────────────────────────────────────
+	// ── Care view ─────────────────────────────────────────────────────────────
 	case viewCare:
 		switch key {
 		case "f":
 			if m.session != nil {
 				m.session.Feed(time.Now())
+				m.ov = overlay{kind: overlayFood, framesLeft: 12}
 			}
 		case "w":
 			if m.session != nil {
 				m.session.Walk(time.Now())
+				m.ov = overlay{kind: overlaySparkles, framesLeft: 12}
 			}
 		case "s":
 			if m.session != nil {
 				if m.session.State == zoo.StateSleeping {
 					m.session.WakeUp()
+					m.ov = overlay{}
 				} else {
 					m.session.Sleep()
+					m.ov = overlay{kind: overlayZzz, framesLeft: 999} // persists while sleeping
 				}
 			}
 		case "p":
 			if m.session != nil {
 				m.session.Pet()
+				m.ov = overlay{kind: overlayHearts, framesLeft: 12}
 			}
 		case "esc":
-			// Release the animal, go back to category picker.
 			m.session = nil
-			m.view = viewPickCategory
-			m.catIdx = 0
+			m.ov = overlay{}
+			m.view = viewPickSpecies
+			m.speciesIdx = 0
 			m.animalIdx = 0
 		}
 	}
@@ -184,34 +248,36 @@ func (m Model) View() string {
 
 	var content string
 	switch m.view {
-	case viewPickCategory:
-		content = m.viewCategory()
+	case viewPickSpecies:
+		content = m.viewSpecies()
 	case viewPickAnimal:
 		content = m.viewAnimal()
 	case viewCare:
 		content = m.viewCare()
 	}
 
-	// Center in terminal.
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// ── Category picker ───────────────────────────────────────────────────────────
+// ── Species picker ────────────────────────────────────────────────────────────
 
-func (m Model) viewCategory() string {
+func (m Model) viewSpecies() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("foster an animal"))
 	b.WriteString("\n\n")
-	b.WriteString(subStyle.Render("choose a category"))
-	b.WriteString("\n\n")
 
-	for i, cat := range m.cats {
-		icon := catIcons[cat]
-		label := fmt.Sprintf("  %s  %s", icon, cat)
-		if i == m.catIdx {
-			b.WriteString(selectedStyle.Render("▶ " + fmt.Sprintf("%s  %s", icon, cat)))
+	bySpecies := zoo.BySpecies()
+	for i, species := range m.speciesList {
+		animals := bySpecies[species]
+		if len(animals) == 0 {
+			continue
+		}
+		label := zoo.SpeciesLabel(species)
+		count := fmt.Sprintf("(%d)", len(animals))
+		if i == m.speciesIdx {
+			b.WriteString(selectedStyle.Render(fmt.Sprintf("▶ %-12s %s", label, count)))
 		} else {
-			b.WriteString(itemStyle.Render(label))
+			b.WriteString(itemStyle.Render(fmt.Sprintf("  %-12s %s", label, count)))
 		}
 		b.WriteByte('\n')
 	}
@@ -221,33 +287,31 @@ func (m Model) viewCategory() string {
 	return b.String()
 }
 
-var catIcons = map[string]string{
-	"farm":   "🌾",
-	"exotic": "🌿",
-}
-
 // ── Animal picker ─────────────────────────────────────────────────────────────
 
 func (m Model) viewAnimal() string {
-	cat := m.cats[m.catIdx]
+	if len(m.animals) == 0 {
+		return ""
+	}
+	species := zoo.SpeciesLabel(m.animals[0].Species)
+
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("foster an animal"))
-	b.WriteString("\n\n")
-	b.WriteString(subStyle.Render(fmt.Sprintf("%s animals", cat)))
+	b.WriteString("\n")
+	b.WriteString(subStyle.Render(strings.ToLower(species)))
 	b.WriteString("\n\n")
 
 	for i, a := range m.animals {
-		name := fmt.Sprintf("%-10s  %s", a.Name, a.Species)
 		if i == m.animalIdx {
-			b.WriteString(selectedStyle.Render("▶ " + name))
+			b.WriteString(selectedStyle.Render(fmt.Sprintf("▶ %-12s  %s", a.Name, a.Breed)))
 		} else {
-			b.WriteString(itemStyle.Render("  " + name))
+			b.WriteString(itemStyle.Render(fmt.Sprintf("  %-12s  %s", a.Name, a.Breed)))
 		}
 		b.WriteByte('\n')
 	}
 
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("↑↓ to move  ·  enter to foster  ·  esc to categories  ·  q to quit"))
+	b.WriteString(hintStyle.Render("↑↓ to move  ·  enter to foster  ·  esc to species  ·  q to quit"))
 	return b.String()
 }
 
@@ -265,19 +329,29 @@ func (m Model) viewCare() string {
 	// Header
 	b.WriteString(headerStyle.Render(fmt.Sprintf("fostering %s", a.Name)))
 	b.WriteString("\n")
-	b.WriteString(subStyle.Render(fmt.Sprintf("%s  ·  %s", a.Species, a.Category)))
+	b.WriteString(subStyle.Render(fmt.Sprintf("%s  ·  %s", a.Breed, a.Species)))
 	b.WriteString("\n\n")
+
+	// Overlay (hearts, sparkles, food) — shown above the animal
+	if m.ov.active() && m.ov.kind != overlayZzz {
+		b.WriteString(m.ov.render())
+		b.WriteString("\n")
+	}
 
 	// Animated animal frame
 	frame := m.animal.View()
 	if frame != "" {
 		b.WriteString(animalFrameStyle.Render(frame))
-		b.WriteString("\n\n")
 	}
 
+	// Zzz overlay — shown to the right of the animal on the same lines
+	if m.ov.active() && m.ov.kind == overlayZzz {
+		b.WriteString("  " + m.ov.render())
+	}
+	b.WriteString("\n\n")
+
 	// State label
-	stateStr := s.State.String()
-	b.WriteString(stateStyle.Render(fmt.Sprintf("[ %s ]", stateStr)))
+	b.WriteString(stateStyle.Render(fmt.Sprintf("[ %s ]", s.State.String())))
 	b.WriteString("\n\n")
 
 	// Stat bars
@@ -289,13 +363,13 @@ func (m Model) viewCare() string {
 	b.WriteString("\n\n")
 
 	// Actions
-	b.WriteString(actionStyle.Render("f") + dimStyle.Render(" feed    "))
-	b.WriteString(actionStyle.Render("w") + dimStyle.Render(" walk    "))
 	sleepLabel := "sleep"
 	if s.State == zoo.StateSleeping {
-		sleepLabel = "wake"
+		sleepLabel = "wake "
 	}
-	b.WriteString(actionStyle.Render("s") + dimStyle.Render(fmt.Sprintf(" %-6s  ", sleepLabel)))
+	b.WriteString(actionStyle.Render("f") + dimStyle.Render(" feed    "))
+	b.WriteString(actionStyle.Render("w") + dimStyle.Render(" walk    "))
+	b.WriteString(actionStyle.Render("s") + dimStyle.Render(fmt.Sprintf(" %s   ", sleepLabel)))
 	b.WriteString(actionStyle.Render("p") + dimStyle.Render(" pet"))
 	b.WriteString("\n\n")
 
@@ -358,4 +432,19 @@ var (
 
 	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241"))
+
+	heartStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("205")).
+			Bold(true)
+
+	sparkleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Bold(true)
+
+	foodStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214"))
+
+	zzzStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("63")).
+			Italic(true)
 )

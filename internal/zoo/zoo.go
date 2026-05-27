@@ -29,11 +29,11 @@ func (s State) String() string {
 // Frames are pre-baked ASCII strings (one per animation frame).
 // A missing state falls back to StateIdle frames.
 type Animal struct {
-	Name     string
-	Species  string
-	Category string // "farm" or "exotic"
-	Frames   map[State][]string
-	Delays   map[State][]time.Duration
+	Name    string // proper name e.g. "Biscuit"
+	Species string // species key e.g. "dog"
+	Breed   string // variant key e.g. "beagle"
+	Frames  map[State][]string
+	Delays  map[State][]time.Duration
 }
 
 // FramesFor returns the frames for a given state, falling back to idle.

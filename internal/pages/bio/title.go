@@ -19,40 +19,36 @@ var titleArtSmall string
 type titleTier int
 
 const (
-	titleLarge  titleTier = iota // graffiti — large + medium tiers
-	titleTiny                    // smslant  — tiny tier (80×24)
+	titleLarge titleTier = iota // graffiti — large + medium tiers
+	titleTiny                   // smslant  — tiny tier (80×24)
 )
 
-// titleAnim drives the animated "zack" title: a green wavefront sweeps left to
-// right across the columns of the figlet art, holds, flickers, then resets to
-// white. The whole thing is column-driven, so vertical strokes of letters all
-// change color in unison — feels like a solid wall passing through.
+// animPhase is the state machine for the combined title + braille animation.
 //
-// The sweep cycle length is always driven by the LARGER art's column count so
-// the timing is consistent regardless of which variant is currently displayed.
-type titleAnim struct {
-	phase    animPhase
-	progress int      // sweep: 0..maxCol  |  flicker: 0..len(flickerColors)
-	maxCol   int      // width of the large art (drives sweep timing)
-	lines    []string // graffiti — large + medium tiers
-	linesSm  []string // smslant  — tiny tier
-}
-
+// Sequence:
+//
+//	phaseSweep      title sweeps left→right (green wavefront by column)
+//	phaseHoldGreen  title holds all-green; braille drop is about to start
+//	phaseBrailDrop  braille glow sweeps top→bottom row by row; title stays green
+//	phaseFlicker    BOTH title + braille flash together
+//	phaseHoldWhite  both return to dim/white; long pause before next cycle
 type animPhase int
 
 const (
 	phaseSweep animPhase = iota
 	phaseHoldGreen
+	phaseBrailDrop
 	phaseFlicker
 	phaseHoldWhite
 )
 
-// Tunables. All in milliseconds.
+// Tunables — all in milliseconds.
 const (
-	sweepStepMs   = 60   // ms per column during sweep
-	holdGreenMs   = 600  // ms holding all-green
+	sweepStepMs   = 60   // ms per column during title sweep
+	holdGreenMs   = 200  // ms holding all-green before braille drop starts
+	brailStepMs   = 55   // ms per row during braille drop
 	flickerStepMs = 80   // ms per flicker frame
-	holdWhiteMs   = 4500 // ms resting at all-white before next cycle
+	holdWhiteMs   = 4500 // ms at rest before next cycle
 )
 
 var flickerColors = []lipgloss.Color{
@@ -63,9 +59,19 @@ var flickerColors = []lipgloss.Color{
 	lipgloss.Color("46"),
 }
 
-// titleTickMsg is emitted on each animation tick. The model handles the phase
-// transitions and schedules the next tick with the appropriate delay.
+// titleTickMsg fires on every animation tick.
 type titleTickMsg struct{}
+
+// titleAnim holds all animation state. brailRows is set by the page on first
+// render (it depends on the tier's row count) and stays constant after that.
+type titleAnim struct {
+	phase     animPhase
+	progress  int      // multi-purpose: column index / flicker index / braille row index
+	maxCol    int      // width of the large art (drives sweep timing)
+	brailRows int      // total rows in the braille field (set by page)
+	lines     []string // graffiti — large + medium tiers
+	linesSm   []string // smslant  — tiny tier
+}
 
 func newTitleAnim() titleAnim {
 	lines := strings.Split(strings.TrimRight(titleArt, "\n"), "\n")
@@ -84,8 +90,7 @@ func newTitleAnim() titleAnim {
 	}
 }
 
-// tick returns a tea.Cmd that fires the next titleTickMsg after the delay for
-// the current phase. Returned from Init and from Update on every titleTickMsg.
+// tick returns the next tea.Cmd with the appropriate delay for the current phase.
 func (a titleAnim) tick() tea.Cmd {
 	var delay time.Duration
 	switch a.phase {
@@ -93,6 +98,8 @@ func (a titleAnim) tick() tea.Cmd {
 		delay = sweepStepMs * time.Millisecond
 	case phaseHoldGreen:
 		delay = holdGreenMs * time.Millisecond
+	case phaseBrailDrop:
+		delay = brailStepMs * time.Millisecond
 	case phaseFlicker:
 		delay = flickerStepMs * time.Millisecond
 	case phaseHoldWhite:
@@ -101,7 +108,7 @@ func (a titleAnim) tick() tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg { return titleTickMsg{} })
 }
 
-// advance progresses the animation by one tick. Returns the new state.
+// advance moves the animation forward by one tick.
 func (a titleAnim) advance() titleAnim {
 	switch a.phase {
 	case phaseSweep:
@@ -111,8 +118,21 @@ func (a titleAnim) advance() titleAnim {
 			a.progress = 0
 		}
 	case phaseHoldGreen:
-		a.phase = phaseFlicker
+		a.phase = phaseBrailDrop
 		a.progress = 0
+	case phaseBrailDrop:
+		a.progress++
+		// brailRows is set by renderBrailleColumn on every View() call before
+		// advance() is invoked, so it should always be current. Guard zero only
+		// for the very first tick before any render has happened.
+		total := a.brailRows
+		if total == 0 {
+			total = 40 // generous fallback — better to overshoot than stop early
+		}
+		if a.progress >= total {
+			a.phase = phaseFlicker
+			a.progress = 0
+		}
 	case phaseFlicker:
 		a.progress++
 		if a.progress >= len(flickerColors) {
@@ -126,7 +146,31 @@ func (a titleAnim) advance() titleAnim {
 	return a
 }
 
-// render colorizes the title art according to the current phase + progress.
+// titleGlowRow returns the current braille wavefront row index.
+//   - During phaseBrailDrop: 0..brailRows-1
+//   - During phaseHoldGreen: -1 (drop not yet started)
+//   - During phaseFlicker/phaseHoldWhite: brailRows (all rows lit / all reset)
+//   - During phaseSweep: -1
+func (a titleAnim) titleGlowRow() int {
+	switch a.phase {
+	case phaseBrailDrop:
+		return a.progress
+	case phaseFlicker:
+		return a.brailRows // all rows lit
+	default:
+		return -1 // nothing lit
+	}
+}
+
+// flickerColor returns the current flicker override colour, or "" if not flickering.
+func (a titleAnim) flickerColor() lipgloss.Color {
+	if a.phase == phaseFlicker {
+		return flickerColors[a.progress]
+	}
+	return ""
+}
+
+// render returns the colourised title string for this tick.
 func (a titleAnim) render(tier titleTier) string {
 	lines := a.lines
 	if tier == titleTiny {
@@ -135,24 +179,21 @@ func (a titleAnim) render(tier titleTier) string {
 	switch a.phase {
 	case phaseSweep:
 		return a.renderSweep(lines, a.progress)
-	case phaseHoldGreen:
+	case phaseHoldGreen, phaseBrailDrop:
+		// Title stays solid green while braille drops.
 		return titleStyleGreen.Render(strings.Join(lines, "\n"))
 	case phaseFlicker:
 		c := flickerColors[a.progress]
-		st := lipgloss.NewStyle().Foreground(c).Bold(true)
-		return st.Render(strings.Join(lines, "\n"))
+		return lipgloss.NewStyle().Foreground(c).Bold(true).Render(strings.Join(lines, "\n"))
 	case phaseHoldWhite:
 		return titleStyleWhite.Render(strings.Join(lines, "\n"))
 	}
 	return strings.Join(lines, "\n")
 }
 
-// renderSweep colors columns 0..wavefront-1 green, the rest white.
-// Wavefront is in the LARGER art's column space — for the small variant it
-// gets proportionally scaled so the sweep visually maps to the same fraction
-// of the title regardless of which variant is being drawn.
+// renderSweep colours columns 0..wavefront-1 green, the rest white.
+// Wavefront is in the large art's column space; scaled for small variant.
 func (a titleAnim) renderSweep(lines []string, wavefront int) string {
-	// Scale wavefront to the displayed art's column count.
 	displayCol := wavefront
 	if a.maxCol > 0 {
 		smMax := 0
@@ -161,7 +202,6 @@ func (a titleAnim) renderSweep(lines []string, wavefront int) string {
 				smMax = len(l)
 			}
 		}
-		// Map progress (0..maxCol) → (0..smMax) for the displayed lines.
 		displayCol = int(float64(wavefront) * float64(smMax) / float64(a.maxCol))
 	}
 	var out strings.Builder

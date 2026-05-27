@@ -38,15 +38,16 @@ ASCII animal for the duration of their session (no persistence).
 ```
 
 ### Current phase
-**Phase 2 — Router + nav. COMPLETE.**
-Real router in `internal/router/`. Stub pages for `adopt`, `projects`,
-`contact`. Username-based SSH entry works. Bio page absorbs nav menu.
+**Phase 3 — Petting zoo. IN PROGRESS.**
+Category picker → animal picker → care view all wired in `internal/pages/adopt/page.go`.
+`internal/zoo/` has full session logic. `internal/ui/animal.go` has animation tick loop.
+Placeholder ASCII frames in `internal/zoo/catalog.go` — replace with real GIF→frames pipeline.
 
 ### Next action
-**Phase 3 — Petting zoo.**
-Entry point: `internal/pages/adopt/page.go` (currently a stub).
-Build: category/animal picker → care view with animation tick loop.
-See `<zoo>` and `<animation>` tags in CONTEXT.md (load both together for Phase 3 work).
+**Phase 3 continued — real ASCII animal frames.**
+Entry point: `tools/build-frames/` (needs to be created).
+Pipeline: GIF assets in `assets/animals/<category>/<species>/` → braille+dither frames
+in `internal/ascii/<category>_<species>_<state>.go`. See `<ascii-pipeline>` in CONTEXT.md.
 
 ### Deploy state
 Nothing deployed. No production host keys. No domain.

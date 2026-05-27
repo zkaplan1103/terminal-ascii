@@ -1,94 +1,8 @@
 # CONTEXT.md — terminal-site
 
-> The single source of truth for working on this project with Claude.
-> Read top-to-bottom on every turn. Load `<core>` always; load other tags
-> only when the prompt touches them (routing table below).
-
----
-
-## <core>
-
-**Always loaded. Keep under ~60 lines.**
-
-### What this project is
-A personal bio "site" served over real SSH. Visitors run `ssh <user>@<domain>`
-and get a Bubble Tea TUI: ASCII self-portrait, short bio, a nav menu where
-each item is paired with an animated ASCII animal running in place. The SSH
-username selects the entry page (`ssh bio@…`, `ssh projects@…`, etc.); unknown
-usernames land on the nav menu.
-
-### Stack (locked in — do not re-debate)
-- Language: **Go** (current toolchain: `go1.26.3 darwin/amd64`)
-- SSH framework: **github.com/charmbracelet/wish**
-- TUI framework: **github.com/charmbracelet/bubbletea**
-- Styling: **github.com/charmbracelet/lipgloss**
-- ASCII pipeline: **chafa** (CLI, subprocess at build time) — pre-bake GIFs to Go arrays; never asciify at runtime
-- Dev port: **2222**; production: 22 (set via flag/env)
-
-### Repo layout
-```
-.
-├── CLAUDE.md                  # short pointer that references this file
-├── CONTEXT.md                 # this file
-├── README.md
-├── main.go                    # entry: Wish server + middlewares
-├── go.mod / go.sum
-├── internal/
-│   ├── pages/                 # one file per page (bio, projects, contact, ...)
-│   ├── router/                # root model + nav, dispatches to pages
-│   ├── ascii/                 # generated frame arrays (one file per animal)
-│   └── ui/                    # shared lipgloss styles, helpers
-├── assets/
-│   └── animals/               # source GIFs (input to build-frames)
-├── tools/
-│   └── build-frames/          # GIF → internal/ascii/<name>.go generator
-├── testdata/                  # golden snapshots for page renders
-└── .ssh/host_ed25519          # DEV host key (gitignored)
-```
-
-### Current phase
-**Phase 1 — Bio page.** Complete. Bio page is wired directly into main.go via a thin `rootModel`. Phase 2 will replace that with a real router. See plan for full phase list.
-
-### Deploy state
-Nothing deployed yet. No production host keys generated. No domain.
-
-### Routing table (which tags to load for what)
-| If the prompt touches… | Load tag(s) |
-|---|---|
-| Visuals, copy, colors, ASCII portrait | `<design>` |
-| Bubble Tea model/update/view patterns, rendering bugs | `<bubble-tea>` |
-| Page navigation, username-based entry, nested models | `<routing>` |
-| Adding/regenerating an animal, build-frames tool | `<ascii-pipeline>` |
-| Animation playback, tick timing, perf | `<animation>` |
-| Small terminals, no-color clients, slow connections, disconnects | `<edge-cases>` |
-| Tests, golden snapshots, local SSH testing | `<testing>` |
-| Auth, rate limits, host keys, dependency audit, port 22 | `<security>` |
-| Build, systemd, hosting target, runtime flags | `<deploy>` |
-| What's deployed where, fingerprints, incidents, version tags | `<ops-log>` |
-
-### Subagent spawn rules
-**Inline (default):** small edits, single-file changes, debugging, copy tweaks,
-anything where a fresh context would be slower than just doing it.
-
-**Spawn a real `Agent` subagent when at least one is true:**
-- Parallelizable across N items (e.g. "add 5 animals" → 5 parallel
-  `<ascii-pipeline>` subagents, one per GIF, results merged)
-- Heavy reads I won't need afterward (security sweep, dep audit, full
-  codebase review)
-- Checkpoint review (pre-deploy `<security>`, pre-merge `<edge-cases>` QA)
-- User explicitly asks ("use a subagent")
-
-Default is **inline**. Spawning has cold-context cost; don't pay it without reason.
-
-### Per-turn workflow
-1. Read this file top-to-bottom (it's short).
-2. Match the prompt against the routing table; load matched tag bodies.
-3. If matches multiple tags and they conflict, surface the conflict to the user.
-4. Decide spawn vs. inline using the rules above; announce the choice in one
-   short sentence before acting.
-5. Do the work.
-6. If the work changes invariants documented in a tag (new dependency, new
-   page, new deploy target), update that tag in the same turn.
+> Extended tag reference. Core context (project overview, routing table, spawn
+> rules) lives in CLAUDE.md — always active, no read needed.
+> Load only the tag bodies the routing table calls for.
 
 ---
 
@@ -114,6 +28,11 @@ Default is **inline**. Spawning has cold-context cost; don't pay it without reas
 - Every page renders inside a known viewport (`tea.WindowSizeMsg` tracked at root).
 - Pages should declare a minimum size; below it, fall back to a stacked layout.
 - ASCII art has fixed dimensions; surrounding text reflows.
+
+### Title fonts
+- **Large + medium tiers** (`title.txt`): `graffiti` figlet font — 6r × 29c. Bold street-style letterforms.
+- **Tiny tier** (`title_small.txt`): `bulbhead` figlet font — 4r × 25c. Compact but chunky.
+- Regenerate: `figlet -f /usr/local/Cellar/figlet/2.2.5/share/figlet/fonts/graffiti "zack" > internal/pages/bio/title.txt`
 
 ### Bio page (Phase 1 — DONE)
 - Portrait: **ascii-image-converter --braille --dither** on a **histogram-equalized**
@@ -195,27 +114,38 @@ Wish middleware reads `s.User()`. Map:
 | Username | Entry page |
 |---|---|
 | `bio` | bio |
+| `adopt` | adopt (petting zoo entry) |
 | `projects` | projects |
 | `contact` | contact |
-| anything else | nav menu |
+| anything else | bio |
 
 Implemented as a `map[string]string` in `internal/router`; default falls through
-to `"nav"`.
+to `"bio"`. The bio page IS the home/menu — it shows the portrait + bio + nav
+menu below, so unknown usernames land on a page that explains the site AND
+shows them where to go next.
 
 ### Nav structure
-The nav page is a list of `NavItem{label, target, animal}`. Arrow keys move
-focus, enter activates, `esc` is a no-op from nav.
+There is no standalone nav page. The bio page (`internal/pages/bio/page.go`)
+holds the nav state — three menu items (adopt / projects / contact) rendered
+below the bio content. Arrow keys move the cursor, enter activates, esc from
+sub-pages returns to bio.
 
 ### Pages registered (current)
-- `bio` (`internal/pages/bio/`) — Phase 1.
-- Currently wired directly in `main.go` via a thin `rootModel` wrapper. Phase 2
-  introduces the real router and the username-based entry table.
+- `bio` (`internal/pages/bio/`) — home page. Portrait + bio + embedded nav menu.
+- `adopt` (`internal/pages/adopt/`) — Phase 2 stub, "zoo opens soon" copy.
+- `projects` (`internal/pages/projects/`) — Phase 2 stub.
+- `contact` (`internal/pages/contact/`) — Phase 2 stub.
+
+All wired through `internal/router/router.go`. Pages talk back to the router
+by returning `page.NavigateMsg{To: "..."}` commands (the message type lives in
+`internal/page/` to break the import cycle). The old standalone `nav` page
+was removed when the bio page absorbed its menu.
 
 ### Adding a new page (checklist)
 1. Create `internal/pages/<name>/page.go` exporting `New() tea.Model`.
 2. Register in `internal/router/router.go` page map.
 3. If accessible by username, add to the username map.
-4. If part of nav, add a `NavItem` (with chosen animal) to the nav config.
+4. If part of nav, add a `NavItem{label, target, description}` to the nav config.
 5. Add golden snapshot under `testdata/pages/<name>/`.
 
 ---
@@ -225,62 +155,185 @@ focus, enter activates, `esc` is a no-op from nav.
 **Load when:** adding an animal, regenerating frames, changing the build-frames tool.
 
 ### Source assets
-`assets/animals/<name>.gif` — small loop (≤16 frames), high contrast, clean
-background. Crop and trim BEFORE asciifying; don't fix it later.
+`assets/animals/<category>/<name>/<state>.gif` — one GIF per (animal, state)
+pair. Small loop (≤16 frames), high contrast, clean background. Crop and trim
+BEFORE asciifying; don't fix it later.
+
+Example:
+```
+assets/animals/
+  farm/
+    dog/
+      idle.gif
+      eating.gif
+      walking.gif
+      sleeping.gif
+    cat/
+      idle.gif
+      ...
+  exotic/
+    parrot/
+      idle.gif
+      ...
+```
+
+States are defined in `<zoo>`; not every animal needs every state (fallback to
+idle if a state's GIF is missing).
 
 ### Generator: `tools/build-frames/`
-A standalone Go program. For each gif under `assets/animals/`:
-1. Extract frames + per-frame delays (using `gif-frames` equivalent via Go's
-   `image/gif` stdlib — it gives us `*gif.GIF` with `.Image[]` and `.Delay[]`).
-2. For each frame, write a temp PNG, call `chafa --size WxH --symbols block --fg-only`,
-   capture stdout.
-3. Emit `internal/ascii/<name>.go`:
+A standalone Go program. For each GIF found under `assets/animals/**`:
+1. Extract frames + per-frame delays via Go's `image/gif` stdlib.
+2. Asciify each frame using the M_B recipe (same as the portrait):
+   `ascii-image-converter <png> -d WxH --braille --dither` on equalized grayscale.
+   (Different recipe than the original block-shaded plan because braille+dither
+   won on visual quality during Phase 1 portrait work.)
+3. Emit `internal/ascii/<category>_<name>_<state>.go`:
    ```go
    package ascii
    import "time"
-   var <Name>Frames = []string{...}
-   var <Name>Delays = []time.Duration{...} // ms × 10 from gif spec
+   var <Name><State>Frames = []string{...}
+   var <Name><State>Delays = []time.Duration{...}
    ```
 
 ### Invocation
-`go run ./tools/build-frames` — regenerates ALL animals. Idempotent.
+`go run ./tools/build-frames` — regenerates ALL animal × state combos. Idempotent.
 
 ### When to spawn subagents
 Adding ≥2 animals at once: spawn one subagent per animal (parallel). Each is
-given just `<ascii-pipeline>` + the specific gif path. They run the generator
-flow for that one animal and report back the generated file path.
+given just `<ascii-pipeline>` + the specific animal folder. They run the
+generator flow for that one animal and report back the generated file paths.
 
 ### Constraints
-- Frame size locked at the per-animal level (encoded in the generated file).
-- Total frame count budget: keep each animal under ~16 frames. 6 animals × 16
-  frames × ~500 bytes ≈ 50KB in the binary. Trivial.
+- Frame size locked per animal (uniform across that animal's states).
+- Total frame count budget: keep each animal's state under ~16 frames.
+  ~8 animals × 4 states × 16 frames × ~500 bytes ≈ 250KB in the binary. Fine.
 
 ---
 
-## <animation>
+## <zoo> + <animation>
 
-**Load when:** tick timing, frame playback, perf, multiple animals at once.
+**Load when:** building/changing the adopt page, animal states, actions, tick
+loop, animal categories, animation playback, tick timing, or perf.
+(These two concerns are always coupled in Phase 3+; load together.)
 
-### Playback model
-Each animal is a `tea.Model` (`internal/ui/animal.go`). State: `frames []string`,
-`delays []time.Duration`, `i int` (current frame).
+### Concept
+The petting zoo is a **foster experience**: visitor SSHs in → picks an animal
+from a category list → cares for it via simple actions → closes the session
+and the animal "goes back." **No persistence whatsoever.** State exists only
+in the live Bubble Tea program instance. Restart the SSH session, get a fresh
+animal. This is intentional (matches the "foster, not adopt" framing in the
+bio copy).
+
+### Categories + animals (V1 target)
+Two top-level categories at launch:
+- **Farm:** dog, cat, horse, pig, cow, chicken
+- **Exotic:** parrot, fox, hedgehog, axolotl
+
+Categories are just a presentation grouping on the picker page. The underlying
+animal type is a `zoo.Animal` regardless of category.
+
+### Animal model (Go)
+```go
+package zoo
+
+type State int
+const (
+    StateIdle State = iota
+    StateEating
+    StateWalking
+    StateSleeping
+)
+
+type Animal struct {
+    Name     string        // proper name (e.g. "Biscuit")
+    Species  string        // "dog", "cat", etc.
+    Category string        // "farm", "exotic"
+    Frames   map[State][]string         // animation frames per state
+    Delays   map[State][]time.Duration  // matching delays
+}
+
+type Session struct {
+    Animal    *Animal
+    State     State
+    Hunger    int       // 0..100, ticks up
+    Energy    int       // 0..100, ticks down
+    Happiness int       // 0..100, decays slowly
+    LastTick  time.Time
+}
+```
+
+Each visitor's session owns a `*Session`. No DB, no file. When `tea.Quit`
+fires, the session and the animal both vanish.
+
+### Actions
+Initial action set, keyboard-driven on the adopt page:
+| Key | Action | Effect |
+|---|---|---|
+| `f` | Feed | hunger -= 30, happiness += 5, state → eating briefly |
+| `w` | Walk | energy -= 15, happiness += 10, state → walking briefly |
+| `s` | Sleep | energy = 100, state → sleeping until next action |
+| `p` | Pet | happiness += 5 |
+| `esc` | Release | go back to picker / bio |
+
+State transitions go: action → temporary state animation for N seconds → back
+to idle. The animal's "natural" state is idle unless directed.
+
+### Tick loop
+A `time.Tick(1 * time.Second)` running while the adopt page is active:
+- Hunger ticks up +1 per minute (60s)
+- Energy ticks down -1 per minute when state != sleeping; +5 per 10s when sleeping
+- Happiness decays -1 per 2 min
+- If hunger > 80: animal becomes "unhappy" (sad face overlay, or whine sound text)
+
+Numbers are placeholders. Tune by feel during Phase 3.
+
+### Picker UX
+The adopt page entry shows a category list. Pick category → pick animal →
+enters the care view. Each animal in the picker shows: name, species, a tiny
+idle preview frame.
+
+### Hard constraints
+- **No persistence between sessions.** Don't even tempt yourself by writing
+  state to a file "just in case." If we ever add persistence it's a Phase 4
+  conversation about identity (SSH pubkey hashing, etc.) and a deliberate
+  pivot — not creeping in via a TODO.
+- **One animal per session.** Visitor releases and picks again; we don't
+  manage multiple animals concurrently.
+- **Per-IP rate limit on actions.** Already need this for security but doubly
+  relevant if someone tries to spam `f` 10,000 times.
+
+### Future ideas (NOT in V1)
+- Other visitors' animals visible in a "park" view
+- Mini-games (fetch, hide and seek)
+- Pet evolution / growth stages
+- Achievements
+
+These stay out until V1 ships and we know what's actually fun.
+
+### Animation subsystem
+
+**Playback model:**
+The on-screen animal is a `tea.Model` (`internal/ui/animal.go`). State:
+`frames []string`, `delays []time.Duration`, `i int` (current frame), plus
+a pointer to the active state's frame slice (from `internal/ascii/`).
 
 Update receives `tickMsg`: advance `i = (i+1) % len(frames)`, return a new
 `tea.Tick(delays[i], tickFn)` command. View returns `frames[i]`.
 
-### Multi-animal coordination
-N animals = N independent timers. They drift apart over time, which is desired
-(otherwise they all step in sync and look mechanical).
+State changes: swap the frame slice and reset `i = 0`.
 
-### Perf budget
-- 6 animals × ~12 fps × ~500 bytes/frame ≈ 36 KB/s uncompressed. SSH compresses
-  well; this is fine over any modern link.
-- Watch for: re-rendering parent on every child tick. The router's View should
-  call into the nav, which should memoize/cache the non-animal portions.
+**Coordination:**
+Only ONE animal animates at a time in V1. Timer coordination is trivial.
 
-### Frame box discipline
-Wrap each animal in `lipgloss.Place(width, height, …)` with the animal's
-declared dimensions. Frame-to-frame size jitter WILL push neighbors otherwise.
+**Perf budget:**
+1 animal × ~12 fps × ~500 bytes/frame ≈ 6 KB/s uncompressed. SSH compresses well.
+Watch for: don't re-render the whole adopt page on every animal tick — stats
+bar and action hints should only re-render when their underlying values change.
+
+**Frame box discipline:**
+Wrap the animal in `lipgloss.Place(width, height, …)` with its declared
+dimensions. Keep frame sizes consistent across states for the same animal
+(pad shorter-state frames with whitespace if needed) or neighbors will reflow.
 
 ---
 
@@ -289,11 +342,13 @@ declared dimensions. Frame-to-frame size jitter WILL push neighbors otherwise.
 **Load when:** small terminals, slow links, no-color clients, weird disconnects, robustness pass.
 
 ### Terminal capabilities to handle
-- **Bio page layout tiers** (`internal/pages/bio/page.go`):
-  - `width ≥ 120 && height ≥ 38`: large portrait + text
-  - `width ≥ 100 && height ≥ 27`: medium portrait + text (108×27 mori-reference target)
-  - `height ≥ 28`: stacked small portrait + text
-  - else: text-only
+- **Bio page layout tiers** (`internal/pages/bio/page.go`) — ALWAYS side-by-side (ASCII left, text right) above the 80×24 floor:
+  - `width ≥ 126 && height ≥ 34`: large portrait (60-col) + full bio (54-inner frame), large title
+  - `width ≥ 110 && height ≥ 26`: medium portrait (50-col) + full bio, small title
+  - `width ≥ 80  && height ≥ 24`: tiny portrait (30-col) + compact bio (38-inner frame), small title
+  - else: "please resize your terminal to at least 80×24" message
+- **Render invariant:** `View()` always emits exactly `m.height` rows (padded with blanks if natural content is shorter, truncated if longer). This prevents alt-screen scroll on animation re-paint — the bug that caused phantom-duplicate footers at large sizes. `clampToHeight` in page.go is the enforcement point. Do not bypass it.
+- **No stacked layout exists.** A previous "stacked" tier (portrait above text) was removed because it made narrow terminals feel broken; the tiny tier now keeps side-by-side all the way down to 80×24 by using a smaller portrait + compact bio.
 - Future pages (nav, projects, …) should follow the same three-tier pattern when
   they have art alongside content.
 - No truecolor (`COLORTERM` unset): lipgloss handles via its color profile detection (Wish exposes the right profile per session).

@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
 
-	"github.com/zkaplan/terminal-site/internal/pages/bio"
+	"github.com/zkaplan/terminal-site/internal/router"
 )
 
 const (
@@ -62,42 +62,10 @@ func main() {
 
 func teaHandler(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 	pty, _, _ := s.Pty()
-	m := rootModel{
-		page:   bio.New(),
-		width:  pty.Window.Width,
-		height: pty.Window.Height,
+	m := router.New(s.User(), pty.Window.Width, pty.Window.Height)
+	renderer := bubbletea.MakeRenderer(s)
+	return m, []tea.ProgramOption{
+		tea.WithAltScreen(),
+		tea.WithOutput(renderer.Output()),
 	}
-	// Prime the page with its first size message so it can render
-	// before any user input arrives.
-	m.page, _ = m.page.Update(tea.WindowSizeMsg{Width: m.width, Height: m.height})
-	return m, []tea.ProgramOption{tea.WithAltScreen()}
 }
-
-// rootModel is a thin wrapper that handles global keys (quit) and
-// forwards everything else to the active page. Phase 2 will replace
-// this with a real router that swaps pages based on SSH username.
-type rootModel struct {
-	page   tea.Model
-	width  int
-	height int
-}
-
-func (m rootModel) Init() tea.Cmd { return m.page.Init() }
-
-func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		}
-	}
-	var cmd tea.Cmd
-	m.page, cmd = m.page.Update(msg)
-	return m, cmd
-}
-
-func (m rootModel) View() string { return m.page.View() }

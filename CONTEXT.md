@@ -53,7 +53,8 @@
   - `width ≥ 100 && height ≥ 27`: medium portrait + text (the 108×27 target)
   - `height ≥ 28`: stacked small portrait + text
   - else: text-only
-- Text block: name (bold orange), tagline (italic gray), bio (3 lines + spacer + 2 lines), handles (3 lines, cyan), footer hint (`enter to open · q to quit`, dim italic).
+- Text block: name (bold orange), tagline (italic gray), bio (3 paragraphs: 4+6+3 lines at large/medium, 2+3 lines at tiny), nav (projects → projects page, about → adopt/zoo page, contact → contact page), footer hint.
+- Nav labels: `projects | about | contact`
 - Source: `assets/DSC05148_Original.JPG` (dim-lit portrait against graffiti wall — works as-is,
   no background removal). Critical: image needs strong directional light + visible eye/nose
   shadow + dark background for the inverted-braille pipeline to surface facial features.

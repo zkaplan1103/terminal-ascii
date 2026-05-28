@@ -51,31 +51,36 @@ const (
 // bioParagraphs is the full bio used at large + medium tiers.
 var bioParagraphs = [][]string{
 	{
-		"is a developer making small things on the internet.",
-		"mostly terminals, browsers second. likes weird",
-		"interfaces, slow software, and projects that don't",
-		"take themselves too seriously.",
+		"is a technical designer obsessed with the idea that",
+		"the design space has unlimited potential — and the",
+		"best projects live at the edges of it. weird, cool,",
+		"and built for the experience first.",
 	},
 	{
-		"this site is a petting zoo over ssh. pick an animal",
-		"from the farm or exotic list, foster it for your",
-		"session, and care for it with feed / walk / sleep /",
-		"pet actions. when you disconnect, the animal goes",
-		"back. no accounts, no saves — like the best kind of",
-		"foster: brief.",
+		"this site is an ascii art showroom. I saw people",
+		"making terminal bio pages and wanted to take it",
+		"further: an interactive hub where every section is",
+		"its own ascii project with its own reason to exist.",
+		"the terminal is the perfect canvas — its constraints",
+		"are the whole point.",
+	},
+	{
+		"each project here comes with a description of why I",
+		"built it and what I liked about it. if you have an",
+		"idea for a section I should make, reach out.",
 	},
 }
 
 // bioParagraphsTiny is the compact bio for the 80×24 tier.
 var bioParagraphsTiny = [][]string{
 	{
-		"developer making small things on the",
-		"internet. mostly terminals.",
+		"technical designer. weird projects,",
+		"cool experiences, terminals first.",
 	},
 	{
-		"this site is a petting zoo over ssh.",
-		"pick an animal, foster it for your",
-		"session, then let go — it goes back.",
+		"ascii art showroom over ssh. every",
+		"section is its own project — reach",
+		"out if you have an idea for one.",
 	},
 }
 
@@ -86,8 +91,8 @@ type navItem struct {
 }
 
 var navItems = []navItem{
-	{"adopt", "adopt", "foster an ascii animal (zoo opens soon)"},
-	{"projects", "projects", "things I'm building"},
+	{"projects", "projects", "ascii projects & experiments"},
+	{"about", "adopt", "the petting zoo — foster an animal"},
 	{"contact", "contact", "say hi"},
 }
 

@@ -17,7 +17,8 @@ import (
 type adoptView int
 
 const (
-	viewPickSpecies adoptView = iota // pick a species (dogs, cats, horses…)
+	viewTitle       adoptView = iota // cinematic title screen
+	viewPickSpecies                  // pick a species (dogs, cats, horses…)
 	viewPickAnimal                   // pick a named animal within that species
 	viewCare                         // care view with animation
 )
@@ -107,6 +108,7 @@ type Model struct {
 	height int
 
 	view         adoptView
+	title        sceneAnim
 	speciesIdx   int      // cursor in species picker
 	speciesList  []string // ordered list of species keys
 	animalIdx    int      // cursor in animal picker
@@ -119,11 +121,13 @@ type Model struct {
 
 func New() Model {
 	return Model{
+		view:        viewTitle,
+		title:       newSceneAnim(),
 		speciesList: zoo.SpeciesOrder,
 	}
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return m.title.init() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -131,6 +135,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case sceneMoveMsg, playTickMsg:
+		if m.view == viewTitle {
+			tc := tierForSize(m.width, m.height)
+			var cmd tea.Cmd
+			m.title, cmd = m.title.update(msg, tc.sceneW, tc.play)
+			return m, cmd
+		}
 
 	case zooTickMsg:
 		if m.session != nil {
@@ -156,6 +168,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	switch m.view {
+
+	// ── Title screen ──────────────────────────────────────────────────────────
+	case viewTitle:
+		switch key {
+		case "enter", " ":
+			m.view = viewPickSpecies
+		case "esc":
+			return m, func() tea.Msg { return page.NavigateMsg{To: "bio"} }
+		}
 
 	// ── Species picker ────────────────────────────────────────────────────────
 	case viewPickSpecies:
@@ -244,6 +265,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+
+	// Title screen owns its own full-screen layout
+	if m.view == viewTitle {
+		return m.title.view(m.width, m.height)
 	}
 
 	var content string
